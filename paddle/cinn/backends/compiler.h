@@ -116,8 +116,6 @@ class Compiler final {
 
   void ExportObject(const std::string& path);
 
-  std::string GetSourceCode(const ir::Module& module);
-
   void BuildDefault(const ir::Module& module);
 
   /**

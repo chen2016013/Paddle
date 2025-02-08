@@ -36,6 +36,16 @@ const size_t JitSafeHeaderGenerator::size() const {
 
 JitSafeHeaderGenerator::JitSafeHeaderGenerator() {
   const auto& headers_map = ::jitify::detail::get_jitsafe_headers_map();
+  // for (auto& pair : headers_map) {
+  //     if (pair.first == "cstdint" || pair.first == "stdint.h" ||
+  //         pair.first == "climits" || pair.first == "stddef.h" ||
+  //         pair.first == "stdlib.h"  ||
+  //         pair.first == "cmath") {
+  //       include_names_.emplace_back(pair.first.data());
+  //       headers_.emplace_back(pair.second.data());
+  //     }
+  //   }
+
   for (auto& pair : headers_map) {
     include_names_.emplace_back(pair.first.data());
     headers_.emplace_back(pair.second.data());

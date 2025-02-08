@@ -20,7 +20,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
-
+#include <ctime>
 #include <fstream>
 #include <iostream>
 
@@ -123,6 +123,44 @@ std::vector<std::string> Compiler::FindCINNRuntimeIncludePaths() {
   return {Context::Global().runtime_include_dir()};
 }
 
+std::string processString(const std::string& s) {
+  if (s.substr(0, 6) == "extern" || s.substr(0, 10) == "__global__") {
+    std::vector<int> leftBraces;  // 存储所有左花括号 '{' 的位置
+    for (int i = 0; i < s.size(); ++i) {
+      if (s[i] == '{') {
+        leftBraces.push_back(i);
+      }
+    }
+    // 如果没有至少两个 '{'，直接返回原字符串
+    if (leftBraces.size() < 2) {
+      return s;
+    }
+    int start = leftBraces[1];  // 第二个 '{' 的位置
+
+    std::vector<int> rightBraces;  // 存储所有右花括号 '}' 的位置
+    for (int i = 0; i < s.size(); ++i) {
+      if (s[i] == '}') {
+        rightBraces.push_back(i);
+      }
+    }
+    // 如果没有至少两个 '}'，直接返回原字符串
+    if (rightBraces.size() < 2) {
+      return s;
+    }
+    int end = rightBraces[rightBraces.size() - 2];  // 倒数第二个 '}' 的位置
+
+    // 如果第二个 '{' 在倒数第二个 '}' 之后，不处理
+    if (start >= end) {
+      return s;
+    }
+
+    // 拼接删除区间后的字符串
+    return s.substr(0, start + 1) + s.substr(end);
+  } else {
+    return s;
+  }
+}
+
 std::string Compiler::CompileCudaSource(const std::string& code,
                                         bool include_headers) {
   const auto& header_gen = JitSafeHeaderGenerator::GetInstance();
@@ -171,15 +209,236 @@ std::string Compiler::CompileCudaSource(const std::string& code,
   for (const auto& option : compile_options) {
     param_cstrings.push_back(option.c_str());
   }
+
+  std::string fake_code =
+      R"(
+    extern \"C\" {
+
+__global__
+void __launch_bounds__(1) fn_generate_shape_cast_yield_store_broadcast_to_divide_generate_shape_cast_broadcast_to_divide_elementwise_mul_subtract_fill_constant_elementwise_add_rsqrt_generate_shape_broadcast_to_subtract_generate_shape_broadcast_to_elementwise_mul_scale_reshape_scale_broadcast_to_elementwise_add_scale_reshape_scale_broadcast_to_elementwise_add_reshape_reshape_assign_out__assign_out__reshape_generate_shape_broadcast_to_elementwise_mul_reshape_generate_shape_broadcast_to_elementwise_add_yield_store_reshape_yield_store_fill_constant_scale_exp_generate_shape_broadcast_to_elementwise_add_generate_shape_broadcast_to_divide_yield_store_elementwise_mul_yield_store___COND__FPA_trueAND_FPA__FPA__FPA__FPA_S0MULS1_BPA_MUL512ll_BPA_GE1ll_BPA_AND_FPA__FPA__FPA_S0MULS1_BPA_MUL512ll_BPA_LE1023ll_BPA__BPA__BPA___kernel(const float* __restrict__ var, const float* __restrict__ var_4, const float* __restrict__ var_9, float* __restrict__ var_23, float* __restrict__ var_29, const float* __restrict__ var_38, const float* __restrict__ var_43, float* __restrict__ var_2, float* __restrict__ var_48, float* __restrict__ var_50, float* __restrict__ var_60, float* __restrict__ var_62, int64_t S0, int64_t S1)
+{
+  __builtin_assume(((int)blockIdx.x < ((S0 * S1) * 512ll)));
+  float* var_36 = var_23;
+  float* var_37 = var_29;
+  if ((((int)blockIdx.x % ((S0 * S1) * 512ll)) == 0ll)) {
+    var_2[((int)blockIdx.x / ((S0 * S1) * 512ll))] = ((float)((S0 * S1)));
+  };
+  if ((((int)blockIdx.x % (S0 * S1)) == 0ll)) {
+    var_36[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] = ((0.899999976f * var_23[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))]) + (0.100000024f * (var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1))))));
+  };
+  if ((((int)blockIdx.x % (S0 * S1)) == 0ll)) {
+    var_37[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] = ((0.899999976f * var_29[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))]) + (0.100000024f * ((var_9[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) - ((var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) * (var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1))))))));
+  };
+  if ((((int)blockIdx.x % (S0 * S1)) == 0ll)) {
+    var_50[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] = cinn_nvgpu_rsqrt_fp32((((var_9[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) - ((var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) * (var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))))) + 9.99999975e-06f));
+  };
+  var_48[(((((((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((int)blockIdx.x / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((int)blockIdx.x % (S0 * S1)))] = ((((var[(((((((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((int)blockIdx.x / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((int)blockIdx.x % (S0 * S1)))] - (var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) - ((var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) * (var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))]) + var_43[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))]);
+  var_60[(((((((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((int)blockIdx.x / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((int)blockIdx.x % (S0 * S1)))] = (1.00000000f / (1.00000000f + cinn_nvgpu_exp_fp32((-1.00000000f * ((((var[(((((((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((int)blockIdx.x / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((int)blockIdx.x % (S0 * S1)))] - (var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) - ((var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) * (var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))]) + var_43[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))])))));
+  var_62[(((((((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((int)blockIdx.x / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((int)blockIdx.x % (S0 * S1)))] = (((((var[(((((((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((int)blockIdx.x / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((int)blockIdx.x % (S0 * S1)))] - (var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) - ((var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) * (var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))]) + var_43[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))]) * (1.00000000f / (1.00000000f + cinn_nvgpu_exp_fp32((-1.00000000f * ((((var[(((((((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((int)blockIdx.x / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((int)blockIdx.x % (S0 * S1)))] - (var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) - ((var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) * (var_4[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))]) + var_43[(((int)blockIdx.x % ((S0 * S1) * 512ll)) / (S0 * S1))]))))));
+}__global__
+void __launch_bounds__(1024) fn_generate_shape_cast_yield_store_broadcast_to_divide_generate_shape_cast_broadcast_to_divide_elementwise_mul_subtract_fill_constant_elementwise_add_rsqrt_generate_shape_broadcast_to_subtract_generate_shape_broadcast_to_elementwise_mul_scale_reshape_scale_broadcast_to_elementwise_add_scale_reshape_scale_broadcast_to_elementwise_add_reshape_reshape_assign_out__assign_out__reshape_generate_shape_broadcast_to_elementwise_mul_reshape_generate_shape_broadcast_to_elementwise_add_yield_store_reshape_yield_store_fill_constant_scale_exp_generate_shape_broadcast_to_elementwise_add_generate_shape_broadcast_to_divide_yield_store_elementwise_mul_yield_store___COND__FPA_trueAND_FPA__FPA__FPA__FPA_S0MULS1_BPA_MUL512ll_BPA_GE1024ll_BPA_AND_FPA__FPA__FPA_S0MULS1_BPA_MUL512ll_BPA_LE1048575ll_BPA__BPA__BPA___kernel(const float* __restrict__ var, const float* __restrict__ var_4, const float* __restrict__ var_9, float* __restrict__ var_23, float* __restrict__ var_29, const float* __restrict__ var_38, const float* __restrict__ var_43, float* __restrict__ var_2, float* __restrict__ var_48, float* __restrict__ var_50, float* __restrict__ var_60, float* __restrict__ var_62, int64_t S0, int64_t S1)
+{
+  __builtin_assume(((int)blockIdx.x < ((((S0 * S1) * 512ll) / 4096ll) + 1ll)));
+  __builtin_assume(((int)threadIdx.x < 1024ll));
+  float* var_36 = var_23;
+  float* var_37 = var_29;
+  for (int32_t i_append_var_67_append_var_68_append_var_69_fused_0 = 0ll; i_append_var_67_append_var_68_append_var_69_fused_0 < 4ll; i_append_var_67_append_var_68_append_var_69_fused_0 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + i_append_var_67_append_var_68_append_var_69_fused_0) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      if ((((((((int)blockIdx.x * 4ll) + i_append_var_67_append_var_68_append_var_69_fused_0) * 1024ll) + (int)threadIdx.x) % ((S0 * S1) * 512ll)) == 0ll)) {
+        var_2[((((i_append_var_67_append_var_68_append_var_69_fused_0 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll))] = ((float)((S0 * S1)));
+      };
+    };
+  };
+  for (int32_t append_var_64_i_append_var_65_append_var_66_fused_0 = 0ll; append_var_64_i_append_var_65_append_var_66_fused_0 < 4ll; append_var_64_i_append_var_65_append_var_66_fused_0 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_0) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      if ((((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_0) * 1024ll) + (int)threadIdx.x) % (S0 * S1)) == 0ll)) {
+        var_36[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_0 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] = ((0.899999976f * var_23[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_0 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))]) + (0.100000024f * (var_4[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_0 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1))))));
+      };
+    };
+  };
+  for (int32_t append_var_64_i_append_var_65_append_var_66_fused_3 = 0ll; append_var_64_i_append_var_65_append_var_66_fused_3 < 4ll; append_var_64_i_append_var_65_append_var_66_fused_3 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_3) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      if ((((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_3) * 1024ll) + (int)threadIdx.x) % (S0 * S1)) == 0ll)) {
+        var_37[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_3 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] = ((0.899999976f * var_29[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_3 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))]) + (0.100000024f * ((var_9[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_3 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) - ((var_4[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_3 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) * (var_4[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_3 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1))))))));
+      };
+    };
+  };
+  for (int32_t append_var_64_i_append_var_65_append_var_66_fused_6 = 0ll; append_var_64_i_append_var_65_append_var_66_fused_6 < 4ll; append_var_64_i_append_var_65_append_var_66_fused_6 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_6) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      if ((((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_6) * 1024ll) + (int)threadIdx.x) % (S0 * S1)) == 0ll)) {
+        var_50[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_6 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] = cinn_nvgpu_rsqrt_fp32((((var_9[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_6 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) - ((var_4[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_6 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) * (var_4[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_6 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))))) + 9.99999975e-06f));
+      };
+    };
+  };
+  for (int32_t i_j_k_a_fused_513 = 0ll; i_j_k_a_fused_513 < 4ll; i_j_k_a_fused_513 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + i_j_k_a_fused_513) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      float var_local_148 = var[(((((((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % (S0 * S1)))];
+      float var_4_local_93 = var_4[(((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_9_local_7 = var_9[(((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_38_local_3 = var_38[(((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_43_local_3 = var_43[(((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      var_62[(((((((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % (S0 * S1)))] = (((((var_local_148 - (var_4_local_93 / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9_local_7 / ((float)((S0 * S1)))) - ((var_4_local_93 / ((float)((S0 * S1)))) * (var_4_local_93 / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38_local_3) + var_43_local_3) * (1.00000000f / (1.00000000f + cinn_nvgpu_exp_fp32((-1.00000000f * ((((var_local_148 - (var_4_local_93 / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9_local_7 / ((float)((S0 * S1)))) - ((var_4_local_93 / ((float)((S0 * S1)))) * (var_4_local_93 / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38_local_3) + var_43_local_3))))));
+      var_48[(((((((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((((i_j_k_a_fused_513 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % (S0 * S1)))] = ((((var_local_148 - (var_4_local_93 / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9_local_7 / ((float)((S0 * S1)))) - ((var_4_local_93 / ((float)((S0 * S1)))) * (var_4_local_93 / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38_local_3) + var_43_local_3);
+    };
+  };
+  for (int32_t i_j_k_a_fused_516 = 0ll; i_j_k_a_fused_516 < 4ll; i_j_k_a_fused_516 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + i_j_k_a_fused_516) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      float var_local_149 = var[(((((((((i_j_k_a_fused_516 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((((i_j_k_a_fused_516 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((((i_j_k_a_fused_516 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % (S0 * S1)))];
+      float var_4_local_94 = var_4[(((((i_j_k_a_fused_516 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_9_local_8 = var_9[(((((i_j_k_a_fused_516 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_38_local_4 = var_38[(((((i_j_k_a_fused_516 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_43_local_4 = var_43[(((((i_j_k_a_fused_516 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      var_60[(((((((((i_j_k_a_fused_516 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((((i_j_k_a_fused_516 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((((i_j_k_a_fused_516 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % (S0 * S1)))] = (1.00000000f / (1.00000000f + cinn_nvgpu_exp_fp32((-1.00000000f * ((((var_local_149 - (var_4_local_94 / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9_local_8 / ((float)((S0 * S1)))) - ((var_4_local_94 / ((float)((S0 * S1)))) * (var_4_local_94 / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38_local_4) + var_43_local_4)))));
+    };
+  };
+}__global__
+void __launch_bounds__(1024) fn_generate_shape_cast_yield_store_broadcast_to_divide_generate_shape_cast_broadcast_to_divide_elementwise_mul_subtract_fill_constant_elementwise_add_rsqrt_generate_shape_broadcast_to_subtract_generate_shape_broadcast_to_elementwise_mul_scale_reshape_scale_broadcast_to_elementwise_add_scale_reshape_scale_broadcast_to_elementwise_add_reshape_reshape_assign_out__assign_out__reshape_generate_shape_broadcast_to_elementwise_mul_reshape_generate_shape_broadcast_to_elementwise_add_yield_store_reshape_yield_store_fill_constant_scale_exp_generate_shape_broadcast_to_elementwise_add_generate_shape_broadcast_to_divide_yield_store_elementwise_mul_yield_store___COND__FPA_trueAND_FPA__FPA__FPA_S0MULS1_BPA_MUL512ll_BPA_GE1048576ll_BPA__BPA___kernel(const float* __restrict__ var, const float* __restrict__ var_4, const float* __restrict__ var_9, float* __restrict__ var_23, float* __restrict__ var_29, const float* __restrict__ var_38, const float* __restrict__ var_43, float* __restrict__ var_2, float* __restrict__ var_48, float* __restrict__ var_50, float* __restrict__ var_60, float* __restrict__ var_62, int64_t S0, int64_t S1)
+{
+  __builtin_assume(((int)blockIdx.x < ((((S0 * S1) * 512ll) / 4096ll) + 1ll)));
+  __builtin_assume(((int)threadIdx.x < 1024ll));
+  float* var_36 = var_23;
+  float* var_37 = var_29;
+  for (int32_t i_append_var_67_append_var_68_append_var_69_fused_6 = 0ll; i_append_var_67_append_var_68_append_var_69_fused_6 < 4ll; i_append_var_67_append_var_68_append_var_69_fused_6 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + i_append_var_67_append_var_68_append_var_69_fused_6) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      if ((((((((int)blockIdx.x * 4ll) + i_append_var_67_append_var_68_append_var_69_fused_6) * 1024ll) + (int)threadIdx.x) % ((S0 * S1) * 512ll)) == 0ll)) {
+        var_2[((((i_append_var_67_append_var_68_append_var_69_fused_6 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll))] = ((float)((S0 * S1)));
+      };
+    };
+  };
+  for (int32_t append_var_64_i_append_var_65_append_var_66_fused_9 = 0ll; append_var_64_i_append_var_65_append_var_66_fused_9 < 4ll; append_var_64_i_append_var_65_append_var_66_fused_9 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_9) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      if ((((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_9) * 1024ll) + (int)threadIdx.x) % (S0 * S1)) == 0ll)) {
+        var_36[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_9 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] = ((0.899999976f * var_23[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_9 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))]) + (0.100000024f * (var_4[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_9 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1))))));
+      };
+    };
+  };
+  for (int32_t append_var_64_i_append_var_65_append_var_66_fused_12 = 0ll; append_var_64_i_append_var_65_append_var_66_fused_12 < 4ll; append_var_64_i_append_var_65_append_var_66_fused_12 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_12) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      if ((((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_12) * 1024ll) + (int)threadIdx.x) % (S0 * S1)) == 0ll)) {
+        var_37[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_12 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] = ((0.899999976f * var_29[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_12 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))]) + (0.100000024f * ((var_9[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_12 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) - ((var_4[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_12 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) * (var_4[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_12 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1))))))));
+      };
+    };
+  };
+  for (int32_t append_var_64_i_append_var_65_append_var_66_fused_15 = 0ll; append_var_64_i_append_var_65_append_var_66_fused_15 < 4ll; append_var_64_i_append_var_65_append_var_66_fused_15 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_15) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      if ((((((((int)blockIdx.x * 4ll) + append_var_64_i_append_var_65_append_var_66_fused_15) * 1024ll) + (int)threadIdx.x) % (S0 * S1)) == 0ll)) {
+        var_50[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_15 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] = cinn_nvgpu_rsqrt_fp32((((var_9[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_15 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) - ((var_4[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_15 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))) * (var_4[((((((int)blockIdx.x * 4096ll) + (int)threadIdx.x) + (append_var_64_i_append_var_65_append_var_66_fused_15 * 1024ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))] / ((float)((S0 * S1)))))) + 9.99999975e-06f));
+      };
+    };
+  };
+  for (int32_t i_j_k_a_fused_528 = 0ll; i_j_k_a_fused_528 < 4ll; i_j_k_a_fused_528 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + i_j_k_a_fused_528) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      float var_local_150 = var[(((((((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % (S0 * S1)))];
+      float var_4_local_95 = var_4[(((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_9_local_9 = var_9[(((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_38_local_5 = var_38[(((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_43_local_5 = var_43[(((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      var_62[(((((((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % (S0 * S1)))] = (((((var_local_150 - (var_4_local_95 / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9_local_9 / ((float)((S0 * S1)))) - ((var_4_local_95 / ((float)((S0 * S1)))) * (var_4_local_95 / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38_local_5) + var_43_local_5) * (1.00000000f / (1.00000000f + cinn_nvgpu_exp_fp32((-1.00000000f * ((((var_local_150 - (var_4_local_95 / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9_local_9 / ((float)((S0 * S1)))) - ((var_4_local_95 / ((float)((S0 * S1)))) * (var_4_local_95 / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38_local_5) + var_43_local_5))))));
+      var_48[(((((((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((((i_j_k_a_fused_528 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % (S0 * S1)))] = ((((var_local_150 - (var_4_local_95 / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9_local_9 / ((float)((S0 * S1)))) - ((var_4_local_95 / ((float)((S0 * S1)))) * (var_4_local_95 / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38_local_5) + var_43_local_5);
+    };
+  };
+  for (int32_t i_j_k_a_fused_531 = 0ll; i_j_k_a_fused_531 < 4ll; i_j_k_a_fused_531 += 1) {
+    if (((((((int)blockIdx.x * 4ll) + i_j_k_a_fused_531) * 1024ll) + (int)threadIdx.x) < ((S0 * S1) * 512ll))) {
+      float var_local_151 = var[(((((((((i_j_k_a_fused_531 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((((i_j_k_a_fused_531 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((((i_j_k_a_fused_531 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % (S0 * S1)))];
+      float var_4_local_96 = var_4[(((((i_j_k_a_fused_531 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_9_local_10 = var_9[(((((i_j_k_a_fused_531 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_38_local_6 = var_38[(((((i_j_k_a_fused_531 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      float var_43_local_6 = var_43[(((((i_j_k_a_fused_531 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1))];
+      var_60[(((((((((i_j_k_a_fused_531 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % ((S0 * S1) * 512ll)) / (S0 * S1)) + (((((i_j_k_a_fused_531 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) / ((S0 * S1) * 512ll)) * 512ll)) * S0) * S1) + ((((i_j_k_a_fused_531 * 1024ll) + (int)threadIdx.x) + ((int)blockIdx.x * 4096ll)) % (S0 * S1)))] = (1.00000000f / (1.00000000f + cinn_nvgpu_exp_fp32((-1.00000000f * ((((var_local_151 - (var_4_local_96 / ((float)((S0 * S1))))) * cinn_nvgpu_rsqrt_fp32((((var_9_local_10 / ((float)((S0 * S1)))) - ((var_4_local_96 / ((float)((S0 * S1)))) * (var_4_local_96 / ((float)((S0 * S1)))))) + 9.99999975e-06f))) * var_38_local_6) + var_43_local_6)))));
+    };
+  };
+}
+
+})";
+
+  // std::string fake_code =
+  //   R"(
+  //     extern \"C\" {
+
+  // __global__
+  // void __launch_bounds__(1)
+  // fn_generate_shape_cast_yield_store_broadcast_to_divide_generate_shape_cast_broadcast_to_divide_elementwise_mul_subtract_fill_constant_elementwise_add_rsqrt_generate_shape_broadcast_to_subtract_generate_shape_broadcast_to_elementwise_mul_scale_reshape_scale_broadcast_to_elementwise_add_scale_reshape_scale_broadcast_to_elementwise_add_reshape_reshape_assign_out__assign_out__reshape_generate_shape_broadcast_to_elementwise_mul_reshape_generate_shape_broadcast_to_elementwise_add_yield_store_reshape_yield_store_fill_constant_scale_exp_generate_shape_broadcast_to_elementwise_add_generate_shape_broadcast_to_divide_yield_store_elementwise_mul_yield_store___COND__FPA_trueAND_FPA__FPA__FPA__FPA_S0MULS1_BPA_MUL512ll_BPA_GE1ll_BPA_AND_FPA__FPA__FPA_S0MULS1_BPA_MUL512ll_BPA_LE1023ll_BPA__BPA__BPA___kernel(const
+  // float* __restrict__ var, const float* __restrict__ var_4, const float*
+  // __restrict__ var_9, float* __restrict__ var_23, float* __restrict__ var_29,
+  // const float* __restrict__ var_38, const float* __restrict__ var_43, float*
+  // __restrict__ var_2, float* __restrict__ var_48, float* __restrict__ var_50,
+  // float* __restrict__ var_60, float* __restrict__ var_62, int64_t S0, int64_t
+  // S1)
+  // {
+
+  // }
+
+  // })";
+
+  VLOG(0) << "================= header time 1================";
+
   VLOG(3) << "compile options: " << utils::Join(compile_options, " ");
-  NVRTC_CALL(nvrtcCreateProgram(&prog,
-                                code.c_str(),
-                                nullptr,
-                                header_gen.size(),
-                                header_gen.headers().data(),
-                                header_gen.include_names().data()));
-  nvrtcResult compile_res =
-      nvrtcCompileProgram(prog, param_cstrings.size(), param_cstrings.data());
+
+  nvrtcResult compile_res;
+
+  for (int i = 0; i < 2000; ++i) {
+    NVRTC_CALL(nvrtcCreateProgram(&prog,
+                                  fake_code.c_str(),
+                                  nullptr,
+                                  header_gen.size(),
+                                  header_gen.headers().data(),
+                                  header_gen.include_names().data()));
+
+    compile_res =
+        nvrtcCompileProgram(prog, param_cstrings.size(), param_cstrings.data());
+  }
+  VLOG(0) << "================= header time 2================";
+
+  nvrtcProgram prog1;
+
+  for (int i = 0; i < 2000; ++i) {
+    NVRTC_CALL(nvrtcCreateProgram(
+        &prog1, fake_code.c_str(), nullptr, 0, nullptr, nullptr));
+
+    compile_res = nvrtcCompileProgram(
+        prog1, param_cstrings.size(), param_cstrings.data());
+  }
+  VLOG(0) << "================= header time 3================";
+
+  fake_code =
+      R"(
+    extern \"C\" {
+
+__global__
+void __launch_bounds__(1) fn_generate_shape_cast_yield_store_broadcast_to_divide_generate_shape_cast_broadcast_to_divide_elementwise_mul_subtract_fill_constant_elementwise_add_rsqrt_generate_shape_broadcast_to_subtract_generate_shape_broadcast_to_elementwise_mul_scale_reshape_scale_broadcast_to_elementwise_add_scale_reshape_scale_broadcast_to_elementwise_add_reshape_reshape_assign_out__assign_out__reshape_generate_shape_broadcast_to_elementwise_mul_reshape_generate_shape_broadcast_to_elementwise_add_yield_store_reshape_yield_store_fill_constant_scale_exp_generate_shape_broadcast_to_elementwise_add_generate_shape_broadcast_to_divide_yield_store_elementwise_mul_yield_store___COND__FPA_trueAND_FPA__FPA__FPA__FPA_S0MULS1_BPA_MUL512ll_BPA_GE1ll_BPA_AND_FPA__FPA__FPA_S0MULS1_BPA_MUL512ll_BPA_LE1023ll_BPA__BPA__BPA___kernel(const float* __restrict__ var, const float* __restrict__ var_4, const float* __restrict__ var_9, float* __restrict__ var_23, float* __restrict__ var_29, const float* __restrict__ var_38, const float* __restrict__ var_43, float* __restrict__ var_2, float* __restrict__ var_48, float* __restrict__ var_50, float* __restrict__ var_60, float* __restrict__ var_62, int64_t S0, int64_t S1)
+{
+
+}
+
+})";
+
+  VLOG(0) << "================= header time 4================";
+
+  for (int i = 0; i < 2000; ++i) {
+    NVRTC_CALL(nvrtcCreateProgram(&prog,
+                                  fake_code.c_str(),
+                                  nullptr,
+                                  header_gen.size(),
+                                  header_gen.headers().data(),
+                                  header_gen.include_names().data()));
+
+    compile_res =
+        nvrtcCompileProgram(prog, param_cstrings.size(), param_cstrings.data());
+  }
+  VLOG(0) << "================= header time 5================";
+
+  for (int i = 0; i < 2000; ++i) {
+    NVRTC_CALL(nvrtcCreateProgram(
+        &prog1, fake_code.c_str(), nullptr, 0, nullptr, nullptr));
+
+    compile_res = nvrtcCompileProgram(
+        prog1, param_cstrings.size(), param_cstrings.data());
+  }
+  VLOG(0) << "================= header time 6================";
+
+  std::stringstream ss;
+  ss << "====================================.";
+  PADDLE_THROW(::common::errors::Fatal(ss.str()));
 
   {  // get log
     size_t log_size;
