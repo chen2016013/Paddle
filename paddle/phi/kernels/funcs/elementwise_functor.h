@@ -16,9 +16,6 @@ limitations under the License. */
 
 #include "paddle/common/hostdevice.h"
 #include "paddle/common/macros.h"
-#include "paddle/phi/common/bfloat16.h"
-#include "paddle/phi/common/complex.h"
-#include "paddle/phi/common/float16.h"
 #include "paddle/phi/core/enforce.h"
 #if defined(__xpu__)
 #include <xpu/runtime.h>
@@ -581,8 +578,8 @@ struct MaximumFunctor {
 template <typename T>
 struct MaximumFunctor<
     T,
-    typename std::enable_if<std::is_same_v<T, phi::dtype::bfloat16> ||
-                            std::is_same_v<T, phi::dtype::float16>>::type> {
+    typename std::enable_if<std::is_same_v<T, phi::bfloat16> ||
+                            std::is_same_v<T, phi::float16>>::type> {
   inline HOSTDEVICE T operator()(const T a, const T b) const {
     if (phi::dtype::isnan(a)) return a;
     if (phi::dtype::isnan(b)) return b;
@@ -654,8 +651,8 @@ struct MinimumFunctor {
 template <typename T>
 struct MinimumFunctor<
     T,
-    typename std::enable_if<std::is_same_v<T, phi::dtype::bfloat16> ||
-                            std::is_same_v<T, phi::dtype::float16>>::type> {
+    typename std::enable_if<std::is_same_v<T, phi::bfloat16> ||
+                            std::is_same_v<T, phi::float16>>::type> {
   inline HOSTDEVICE T operator()(const T a, const T b) const {
     if (phi::dtype::isnan(a)) return a;
     if (phi::dtype::isnan(b)) return b;
@@ -703,8 +700,8 @@ struct RemainderFunctor {
     PADDLE_ENFORCE(b != 0, DIV_ERROR_INFO);
     T res = a % b;
 
-    // According to #PR26732: in dividen % divsor
-    // remainder shall have the same sign as divsor.
+    // According to #PR26732: in dividend % divisor
+    // remainder shall have the same sign as divisor.
     if ((res != 0) && ((b ^ res) < 0)) res += b;
     return res;
   }
@@ -717,8 +714,8 @@ struct RemainderFunctor<
   inline HOSTDEVICE T operator()(const T a, const T b) const {
     T res = fmod(a, b);
 
-    // According to #PR26732: in dividen % divsor
-    // remainder shall have the same sign as divsor.
+    // According to #PR26732: in dividend % divisor
+    // remainder shall have the same sign as divisor.
     if ((res != 0) && ((res < 0) != (b < 0))) res += b;
     return res;
   }
@@ -730,8 +727,8 @@ struct RemainderFunctor<dtype::float16> {
                                               const dtype::float16 b) const {
     float b_float = static_cast<float>(b);
     float res = fmod(static_cast<float>(a), b_float);
-    // According to #PR26732: in dividen % divsor
-    // remainder shall have the same sign as divsor.
+    // According to #PR26732: in dividend % divisor
+    // remainder shall have the same sign as divisor.
     if ((res != 0.0f) && ((res < 0.0f) != (b_float < 0.0f))) res += b_float;
     return static_cast<dtype::float16>(res);
   }
@@ -744,8 +741,8 @@ struct RemainderFunctor<dtype::bfloat16> {
     float b_float = static_cast<float>(b);
     float res = fmod(static_cast<float>(a), b_float);
 
-    // According to #PR26732: in dividen % divsor
-    // remainder shall have the same sign as divsor.
+    // According to #PR26732: in dividend % divisor
+    // remainder shall have the same sign as divisor.
     if ((res != 0.0f) && ((res < 0.0f) != (b_float < 0.0f))) res += b_float;
     return static_cast<dtype::bfloat16>(res);
   }
@@ -1324,7 +1321,7 @@ struct ElementwiseInversePowFunctor<ComplexType<T>> {
   inline HOSTDEVICE ComplexType<T> operator()(const ComplexType<T> a,
                                               const ComplexType<T> b) const {
 #if defined(__CUDA_ARCH__) || defined(__HIPCC__)
-    return pow(a, b);
+    return pow(b, a);
 #else
     return std::pow(static_cast<std::complex<T>>(b),
                     static_cast<std::complex<T>>(a));
@@ -1343,13 +1340,12 @@ inline HOSTDEVICE auto copysign_func(const T& a, const T& b) {
 #endif
 }
 
-inline HOSTDEVICE phi::dtype::float16 copysign_func(phi::dtype::float16 a,
-                                                    phi::dtype::float16 b) {
+inline HOSTDEVICE phi::float16 copysign_func(phi::float16 a, phi::float16 b) {
   return phi::dtype::raw_uint16_to_float16((a.x & 0x7fff) | (b.x & 0x8000));
 }
 
-inline HOSTDEVICE phi::dtype::bfloat16 copysign_func(phi::dtype::bfloat16 a,
-                                                     phi::dtype::bfloat16 b) {
+inline HOSTDEVICE phi::bfloat16 copysign_func(phi::bfloat16 a,
+                                              phi::bfloat16 b) {
   return phi::dtype::raw_uint16_to_bfloat16((a.x & 0x7fff) | (b.x & 0x8000));
 }
 
@@ -1378,7 +1374,7 @@ struct CopySignGradXYFunctor {
     if (x == static_cast<InT>(0))
       outs[0] = static_cast<OutT>(0);
     else
-      outs[0] = static_cast<OutT>(dout * (funcs::copysign_func(x, y)) / x);
+      outs[0] = static_cast<OutT>(dout * (funcs::copysign_func(x, y) / x));
     // dy = 0
     outs[1] = static_cast<OutT>(0);
     return outs;

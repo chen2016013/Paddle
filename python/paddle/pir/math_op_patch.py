@@ -12,19 +12,29 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
 
+import copy
 import inspect
 import textwrap
 import warnings
 from functools import reduce
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from paddle import _C_ops
 from paddle.base.libpaddle import DataType
 from paddle.base.wrapped_decorator import wrap_decorator
+from paddle.utils.decorator_utils import (
+    size_args_decorator_patch,
+)
 
 from . import Value
+
+if TYPE_CHECKING:
+    from paddle._typing import DTypeLike, PlaceLike, ShapeLike
+
 
 _already_patch_value = False
 
@@ -36,6 +46,35 @@ _supported_int_dtype_ = [
     DataType.INT32,
     DataType.INT64,
 ]
+
+_supported_dtype_conversions = {
+    # float
+    'float16': 'float16',
+    'half': 'float16',
+    'bfloat16': 'bfloat16',
+    'float32': 'float32',
+    'float': 'float32',
+    'float64': 'float64',
+    'double': 'float64',
+    # int
+    'int8': 'int8',
+    'char': 'int8',
+    # We handle uint8 conversion separately
+    # 'uint8': 'uint8',
+    # 'byte': 'uint8',
+    'int16': 'int16',
+    'short': 'int16',
+    'int32': 'int32',
+    'int': 'int32',
+    'int64': 'int64',
+    'long': 'int64',
+    # other
+    'bool': 'bool',
+    'complex64': 'complex64',
+    'complex128': 'complex128',
+    'cfloat': 'complex64',
+    'cdouble': 'complex128',
+}
 
 SUPPORT_PROMOTION_OPS = [
     "__add__",
@@ -170,6 +209,26 @@ def monkey_patch_value():
 
         # 1 means cuda place, see paddle/phi/kernels/memcpy_kernel.cc
         return _C_ops.memcpy(self, 1)
+
+    @property
+    def is_cuda(self):
+        """
+        Value don't have 'is_cuda' interface in static graph mode
+        But this interface can greatly facilitate dy2static.
+        So we give a warning here and return None.
+        """
+        warnings.warn(
+            "Value do not have 'is_cuda' interface for pir graph mode, try not to use it."
+        )
+        from paddle import framework
+
+        if hasattr(self, 'place') and isinstance(
+            self.place, framework.core.CUDAPlace
+        ):
+            return True
+        else:
+            expected_place = framework._current_expected_place_()
+            return isinstance(expected_place, framework.core.CUDAPlace)
 
     @property
     def place(self):
@@ -370,6 +429,44 @@ def monkey_patch_value():
 
         return _C_ops.cast(self, dtype)
 
+    def byte(self):
+        # since paddle don't support float to uint8, so we need to convert it to int8 first
+        if self.is_floating_point():
+            tensor = astype(self, 'int8')
+            return astype(tensor, 'uint8')
+        elif self.is_complex():
+            real = astype(self.real(), 'int8')
+            return astype(real, 'uint8')
+        else:
+            return astype(self, 'uint8')
+
+    def _create_dtype_conversion_methods():
+        """
+        Batch create all data type conversion methods
+        """
+        methods = []
+        for method_name, target_dtype in _supported_dtype_conversions.items():
+
+            def make_conversion_method(dtype):
+                def conversion_method(self):
+                    return astype(self, dtype)
+
+                return conversion_method
+
+            method_impl = make_conversion_method(target_dtype)
+            method_impl.__name__ = method_name
+            method_impl.__doc__ = f"""
+            Cast a Value to {target_dtype} data type if it differs from the current dtype;
+            otherwise, return the original Value.
+            Returns:
+                Value: a new Value with {target_dtype} dtype
+            """
+            methods.append((method_name, method_impl))
+        return methods
+
+    def type_as(self, other):
+        return self.astype(other.dtype)
+
     def _scalar_add_(var, value):
         return paddle.scale(var, 1.0, value)
 
@@ -565,6 +662,193 @@ def monkey_patch_value():
         perm[-1], perm[-2] = perm[-2], perm[-1]
 
         return _C_ops.transpose(self, perm)
+
+    def _new_full_(
+        self,
+        size: ShapeLike,
+        fill_value: bool | float | paddle.Tensor,
+        *,
+        dtype: DTypeLike | None = None,
+        device: PlaceLike | None = None,
+        requires_grad: bool = False,
+        pin_memory: bool = False,
+    ):
+        """
+
+        Returns a Tensor of size ``size`` filled with ``fill_value``.
+        By default, the returned Tensor has the same dtype and place as this tensor.
+
+        Examples:
+            .. code-block:: python
+
+                >>> import paddle
+                >>> paddle.enable_static()
+
+                >>> x = paddle.ones(shape=[2, 3, 5])
+                >>> x_new = x.new_full([2, 3], 3.14, dtype="float64", device="cpu")
+
+                >>> exe = paddle.static.Executor()
+                >>> x_new_np = exe.run(paddle.static.default_main_program(), fetch_list=[x_new])[0]
+                >>> print(x_new_np.shape)
+                (2, 5, 3)
+                >>> print(str(x_new_np.dtype))
+                'paddle.float64'
+                >>> print(x_new_np.place)
+                Place(cpu)
+        """
+        if dtype is None:
+            dtype = self.dtype
+        if device is None:
+            device = self.place
+
+        return paddle.full(
+            size,
+            fill_value,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+            pin_memory=pin_memory,
+        )
+
+    @size_args_decorator_patch
+    def _new_empty_(
+        self,
+        size: ShapeLike,
+        *,
+        dtype: DTypeLike | None = None,
+        device: PlaceLike | None = None,
+        requires_grad: bool = False,
+        pin_memory: bool = False,
+    ):
+        """
+
+        Returns a Tensor of size ``size`` filled with uninitialized data.
+        By default, the returned Tensor has the same dtype and place as this tensor.
+
+        Examples:
+            .. code-block:: python
+
+                >>> import paddle
+                >>> paddle.enable_static()
+
+                >>> x = paddle.ones(shape=[2, 3, 5])
+                >>> x_new = x.new_empty([2, 3], dtype="float64", device="cpu")
+
+                >>> exe = paddle.static.Executor()
+                >>> x_new_np = exe.run(paddle.static.default_main_program(), fetch_list=[x_new])[0]
+                >>> print(x_new_np.shape)
+                (2, 3)
+                >>> print(str(x_new_np.dtype))
+                'paddle.float64'
+                >>> print(x_new_np.place)
+                Place(cpu)
+        """
+        if dtype is None:
+            dtype = self.dtype
+        if device is None:
+            device = self.place
+
+        return paddle.empty(
+            size,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+            pin_memory=pin_memory,
+        )
+
+    @size_args_decorator_patch
+    def _new_ones_(
+        self,
+        size: ShapeLike,
+        *,
+        dtype: DTypeLike | None = None,
+        device: PlaceLike | None = None,
+        requires_grad: bool = False,
+        pin_memory: bool = False,
+    ):
+        """
+
+        Returns a Tensor of size ``size`` filled with ``1``.
+        By default, the returned Tensor has the same dtype and place as this tensor.
+
+        Examples:
+            .. code-block:: python
+
+                >>> import paddle
+                >>> paddle.enable_static()
+
+                >>> x = paddle.ones(shape=[2, 3, 5])
+                >>> x_new = x.new_ones([2, 3], dtype="float64", device="cpu")
+
+                >>> exe = paddle.static.Executor()
+                >>> x_new_np = exe.run(paddle.static.default_main_program(), fetch_list=[x_new])[0]
+                >>> print(x_new_np.shape)
+                (2, 3)
+                >>> print(str(x_new_np.dtype))
+                'paddle.float64'
+                >>> print(x_new_np.place)
+                Place(cpu)
+        """
+        if dtype is None:
+            dtype = self.dtype
+        if device is None:
+            device = self.place
+
+        return paddle.full(
+            size,
+            1,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+            pin_memory=pin_memory,
+        )
+
+    @size_args_decorator_patch
+    def _new_zeros_(
+        self,
+        size: ShapeLike,
+        *,
+        dtype: DTypeLike | None = None,
+        device: PlaceLike | None = None,
+        requires_grad: bool = False,
+        pin_memory: bool = False,
+    ):
+        """
+
+        Returns a Tensor of size ``size`` filled with ``0``.
+        By default, the returned Tensor has the same dtype and place as this tensor.
+
+        Examples:
+            .. code-block:: python
+
+                >>> import paddle
+                >>> paddle.enable_static()
+
+                >>> x = paddle.ones(shape=[2, 3, 5])
+                >>> x_new = x.new_zeros([2, 3], dtype="float64", device="cpu")
+
+                >>> exe = paddle.static.Executor()
+                >>> x_new_np = exe.run(paddle.static.default_main_program(), fetch_list=[x_new])[0]
+                >>> print(x_new_np.shape)
+                (2, 3)
+                >>> print(str(x_new_np.dtype))
+                'paddle.float64'
+                >>> print(x_new_np.place)
+                Place(cpu)
+        """
+        if dtype is None:
+            dtype = self.dtype
+        if device is None:
+            device = self.place
+
+        return paddle.full(
+            size,
+            0,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+            pin_memory=pin_memory,
+        )
 
     def _int_(self):
         error_msg = """\
@@ -780,9 +1064,9 @@ def monkey_patch_value():
         return _C_ops.sparse_indices(self)
 
     def set_shape(self, shape):
-        assert (
-            paddle.base.dygraph.base.in_to_static_mode()
-        ), "We only support call 'set_shape' in to_static mode."
+        assert paddle.base.dygraph.base.in_to_static_mode(), (
+            "We only support call 'set_shape' in to_static mode."
+        )
 
         if self.is_dense_tensor_type() or self.is_selected_row_type():
             type = paddle.pir.create_shaped_type(self.type(), shape)
@@ -800,6 +1084,7 @@ def monkey_patch_value():
         device=None,
         dtype=None,
         blocking=None,
+        copy_tensor=None,
     ):
         if device is None and dtype is None and blocking is None:
             return self
@@ -828,11 +1113,11 @@ def monkey_patch_value():
         if blocking is None:
             blocking = True
         else:
-            assert isinstance(
-                blocking, bool
-            ), "blocking value error, must be the True, False or None"
+            assert isinstance(blocking, bool), (
+                "blocking value error, must be the True, False or None"
+            )
 
-        def transform(t, device, dtype, blocking):
+        def transform(t, device, dtype, blocking, copy_tensor):
             if dtype is None:
                 dtype = t.dtype
             t_used = t
@@ -843,26 +1128,36 @@ def monkey_patch_value():
                     place=t_used.place
                 ):
                     t_casted = t_used.cast(dtype=dtype)
+                    copy_tensor = False
             else:
                 t_casted = t_used
 
             # 2. Copy casted Tensor(in CPU or GPU) to device
             if isinstance(device, paddle.CUDAPlace):
                 new_t = t_casted.cuda(blocking=blocking)
+                copy_tensor = False
             elif isinstance(device, paddle.CUDAPinnedPlace):
                 if blocking is not True:
                     warnings.warn(
                         "blocking is not supported, and it will be ignored."
                     )
                 new_t = _C_ops.memcpy(self, 2)
+                copy_tensor = False
             elif isinstance(device, paddle.CPUPlace):
                 new_t = t_casted.cpu()
+                copy_tensor = False
             else:
                 new_t = t_casted
-
+            if copy_tensor:
+                return copy.deepcopy(new_t)
             return new_t
 
-        return transform(self, device, dtype, blocking)
+        return transform(self, device, dtype, blocking, copy_tensor)
+
+    def __deepcopy__(self, memo):
+        new_tensor = self.clone().detach()
+        memo[id(self)] = new_tensor
+        return new_tensor
 
     def to(self, *args, **kwargs):
         """
@@ -907,6 +1202,16 @@ def monkey_patch_value():
                 Tensor(shape=[3], dtype=int16, place=Place(gpu:0), stop_gradient=True,
                     [4, 5, 6])
         """
+
+        if "non_blocking" in kwargs:
+            non_blocking = kwargs.pop("non_blocking")
+        else:
+            non_blocking = False
+
+        if "copy" in kwargs:
+            copy_tensor = kwargs.pop("copy")
+        else:
+            copy_tensor = False
 
         size_args = len(args)
         size_kwargs = len(kwargs)
@@ -1032,8 +1337,12 @@ def monkey_patch_value():
             args["dtype"] = other.dtype
             # in dy2static, we need show warning for this case
             other.place  # noqa: B018
-
-        return self._to(**args)
+        args["blocking"] = (
+            False if not args.get("blocking", False) or non_blocking else True
+        )
+        args["copy_tensor"] = copy_tensor
+        res = self._to(**args)
+        return res
 
     @fake_interface_only
     def numpy(self):
@@ -1096,6 +1405,55 @@ def monkey_patch_value():
         """
         pass
 
+    @property
+    def requires_grad(self) -> bool:
+        """
+        Whether this Tensor requires gradient computation.
+
+        This is a convenience property that returns the opposite of stop_gradient.
+        Setting requires_grad=True is equivalent to setting stop_gradient=False.
+
+        Examples:
+            .. code-block:: python
+
+                >>> import paddle
+                >>> x = paddle.randn([2, 3])
+                >>> print(x.requires_grad)  # False by default
+                >>>
+                >>> x.requires_grad = False
+                >>> print(x.stop_gradient)  # True
+        """
+        return not self.stop_gradient
+
+    @requires_grad.setter
+    def requires_grad(self, value: bool) -> None:
+        """
+        Set whether this Tensor requires gradient computation.
+
+        Args:
+            value (bool): True to enable gradient computation, False to disable.
+        """
+        if not isinstance(value, bool):
+            raise TypeError(
+                f"requires_grad must be bool, but got {type(value)}"
+            )
+        self.stop_gradient = not value
+
+    @property
+    def itemsize(self) -> int:
+        """
+        Returns the number of bytes allocated on the machine for a single element of the Tensor.
+
+        Examples:
+            .. code-block:: python
+
+                >>> import paddle
+                >>> x = paddle.randn((2,3),dtype=paddle.float64)
+                >>> x.itemsize
+                8
+        """
+        return self.element_size()
+
     import paddle
 
     value_methods = [
@@ -1103,15 +1461,24 @@ def monkey_patch_value():
         ('cuda', cuda),
         ('place', place),
         ('contiguous', contiguous),
+        ('is_cuda', is_cuda),
         ('is_contiguous', is_contiguous),
         ('item', _item),
         ('dim', dim),
         ('ndimension', ndimension),
         ('ndim', _ndim),
         ('astype', astype),
+        ('byte', byte),
+        ('uint8', byte),
+        ('type_as', type_as),
         ('size', _size_),
         ('T', _T_),
         ('mT', _mT_),
+        ('new_full', _new_full_),
+        ('new_empty', _new_empty_),
+        ('new_ones', _new_ones_),
+        ('new_zeros', _new_zeros_),
+        ("requires_grad", requires_grad),
         ('clone', clone),
         ('clear_gradient', clear_gradient),
         ('append', append),
@@ -1126,6 +1493,7 @@ def monkey_patch_value():
         ("tolist", tolist),
         ("numpy", numpy),
         ("register_hook", register_hook),
+        ("__deepcopy__", __deepcopy__),
         # For basic operators
         (
             '__add__',
@@ -1252,7 +1620,10 @@ def monkey_patch_value():
         ('__int__', _int_),
         ('__bool__', _bool_),
         ('__complex__', _complex_),
+        ('itemsize', itemsize),
     ]
+    dtype_conversion_methods = _create_dtype_conversion_methods()
+    value_methods.extend(dtype_conversion_methods)
 
     global _already_patch_value
     if not _already_patch_value:
