@@ -128,7 +128,7 @@ __forceinline__ __device__ int8_t quant_helper(const data_t input,
 }
 
 template <typename data_t>
-__forceinline__ __device__ phi::dtype::float8_e4m3fn fp8_quant_helper(
+__forceinline__ __device__ phi::float8_e4m3fn fp8_quant_helper(
     const data_t input,
     const float scale,
     const int round_type,
@@ -137,7 +137,7 @@ __forceinline__ __device__ phi::dtype::float8_e4m3fn fp8_quant_helper(
   float quant_value = max_bound * scale * static_cast<float>(input);
   quant_value = quant_value > max_bound ? max_bound : quant_value;
   quant_value = quant_value < min_bound ? min_bound : quant_value;
-  return static_cast<phi::dtype::float8_e4m3fn>(quant_value);
+  return static_cast<phi::float8_e4m3fn>(quant_value);
 }
 
 template <typename data_t>
@@ -170,7 +170,7 @@ __global__ void QuantKernel(const data_t* input,
 
 template <typename data_t>
 __global__ void FP8QuantKernel(const data_t* input,
-                               phi::dtype::float8_e4m3fn* output,
+                               phi::float8_e4m3fn* output,
                                const float scale,
                                const int m,
                                const int n,
@@ -329,7 +329,7 @@ void DispatchWithDtype(
   } else if (fmha_out->dtype() == phi::DataType::FLOAT8_E4M3FN) {
     fmha_buf.Resize(fmha_out->dims());
     dev_ctx.template Alloc<T>(&fmha_buf);
-    dev_ctx.template Alloc<phi::dtype::float8_e4m3fn>(fmha_out);
+    dev_ctx.template Alloc<phi::float8_e4m3fn>(fmha_out);
   } else {
     dev_ctx.template Alloc<T>(fmha_out);
     fmha_buf = *fmha_out;
@@ -350,9 +350,9 @@ void DispatchWithDtype(
           << " max_block_per_seq: " << max_block_per_seq;
   VLOG(3) << "fmha_out_dims: " << fmha_out->dims();
 
-  bool causual = true;
+  bool causal = true;
   if (mask) {
-    causual = false;
+    causal = false;
   }
 
   bool use_pre_cache = false;
@@ -516,7 +516,7 @@ void DispatchWithDtype(
     //     qkv_buf.data<T>(), qkv_buf.numel(), "qkv_buf after",
     //     qkv_buf.numel());
     VLOG(3) << "rope end";
-    VLOG(3) << "causual: " << causual;
+    VLOG(3) << "causal: " << causal;
     if (!use_pre_cache && sm >= 80) {
       qkv_transpose_split<T>(dev_ctx,
                              unpadding_q.data<T>(),
@@ -555,12 +555,12 @@ void DispatchWithDtype(
                                       cu_seqlens_q,
                                       cu_seqlens_k,
                                       paddle::none /*fixed_seed_offset*/,
-                                      causual ? paddle::none : mask,
+                                      causal ? paddle::none : mask,
                                       max_enc_len_this_time_data,
                                       max_enc_len_this_time_data,
                                       1.0f / sqrt(static_cast<float>(dim_head)),
                                       0.0,
-                                      causual,
+                                      causal,
                                       false,
                                       true /* is_test*/,
                                       "" /*rng_name*/,
@@ -620,7 +620,7 @@ void DispatchWithDtype(
           seq_lens_encoder,
           (sm < 80 && !use_pre_cache) ? paddle::none : mask,
           1.0f / sqrt(static_cast<float>(dim_head)),
-          (sm < 80 && !use_pre_cache) ? causual : false,
+          (sm < 80 && !use_pre_cache) ? causal : false,
           pre_cache_length,
           &qktv_out);
 #elif defined(PADDLE_WITH_HIP)
@@ -653,7 +653,7 @@ void DispatchWithDtype(
           paddle::none /*fixed_seed_offset*/,
           paddle::none /*mask*/,
           0.0,
-          is_precache_infer ? false : causual /*precache_infer_casual*/,
+          is_precache_infer ? false : causal /*precache_infer_causal*/,
           false,
           is_precache_infer /*is_test*/,
           "" /*rng_name*/,
@@ -821,7 +821,7 @@ void DispatchWithDtype(
       if (fmha_out->dtype() == phi::DataType::FLOAT8_E4M3FN) {
         FP8QuantKernel<T><<<grid, block, 0, dev_ctx.stream()>>>(
             fmha_buf.data<T>(),
-            fmha_out->data<phi::dtype::float8_e4m3fn>(),
+            fmha_out->data<phi::float8_e4m3fn>(),
             out_scale,
             m,
             n,

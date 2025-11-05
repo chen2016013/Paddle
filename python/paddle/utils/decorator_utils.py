@@ -21,11 +21,21 @@ from typing import TYPE_CHECKING, Any, Callable, TypeVar, cast
 
 from typing_extensions import ParamSpec
 
+import paddle
+
 if TYPE_CHECKING:
     from collections.abc import Iterable
 
 _InputT = ParamSpec("_InputT")
 _RetT = TypeVar("_RetT")
+
+
+def _is_int_or_scalar_tensor(x):
+    if isinstance(x, int):
+        return True
+    if isinstance(x, (paddle.Tensor, paddle.pir.Value)):
+        return x.ndim == 0
+    return False
 
 
 class DecoratorBase:
@@ -333,6 +343,9 @@ def size_args_decorator(
             kwargs['shape'] = list(args)
             args = ()
 
+        if 'shape' in kwargs and isinstance(kwargs['shape'], int):
+            kwargs['shape'] = [kwargs['shape']]
+
         return func(*args, **kwargs)
 
     wrapped_func.__signature__ = inspect.signature(func)
@@ -407,8 +420,8 @@ def view_decorator() -> Callable[
                 kwargs["shape_or_dtype"] = kwargs.pop("dtype")
             elif ("size" in kwargs) and ("shape_or_dtype" not in kwargs):
                 kwargs["shape_or_dtype"] = kwargs.pop("size")
-            elif len(args) >= 2 and type(args[1]) is int:
-                if all(type(arg) is int for arg in args[1:]):
+            elif len(args) >= 2 and _is_int_or_scalar_tensor(args[1]):
+                if all(_is_int_or_scalar_tensor(arg) for arg in args[1:]):
                     kwargs["x"] = args[0]
                     kwargs['shape_or_dtype'] = list(args[1:])
                     args = ()
@@ -451,9 +464,9 @@ class ForbidKeywordsDecorator(DecoratorBase):
         if url_suffix:
             self.warn_msg = (
                 f"The API '{func_name}' may behave differently from its PyTorch counterpart. "
-                f"Refer to the compatibility guide for details:\n"
-                f"https://www.paddlepaddle.org.cn/documentation/docs/en/develop/guides/model_convert/"
-                f"convert_from_pytorch/api_difference/{url_suffix}.html"
+                "Refer to the compatibility guide for details:\n"
+                "https://www.paddlepaddle.org.cn/documentation/docs/zh/develop/guides/model_convert/"
+                "convert_from_pytorch/pytorch_api_mapping_cn.html#api"
             )
 
     def process(
@@ -474,6 +487,7 @@ class ForbidKeywordsDecorator(DecoratorBase):
             warnings.warn(
                 self.warn_msg,
                 category=UserWarning,
+                stacklevel=3,
             )
             self.warn_msg = None
         return args, kwargs
@@ -538,8 +552,8 @@ def reshape_decorator() -> Callable[
         def wrapper(*args: _InputT.args, **kwargs: _InputT.kwargs) -> _RetT:
             if ("input" in kwargs) and ("x" not in kwargs):
                 kwargs["x"] = kwargs.pop("input")
-            elif len(args) >= 2 and type(args[1]) is int:
-                if all(type(arg) is int for arg in args[1:]):
+            elif len(args) >= 2 and _is_int_or_scalar_tensor(args[1]):
+                if all(_is_int_or_scalar_tensor(arg) for arg in args[1:]):
                     kwargs["x"] = args[0]
                     kwargs['shape'] = list(args[1:])
                     args = ()
@@ -610,8 +624,8 @@ def expand_decorator() -> Callable[
                 kwargs["x"] = kwargs.pop("input")
             if ("size" in kwargs) and ("shape" not in kwargs):
                 kwargs["shape"] = kwargs.pop("size")
-            elif len(args) >= 2 and type(args[1]) is int:
-                if all(type(arg) is int for arg in args[1:]):
+            elif len(args) >= 2 and _is_int_or_scalar_tensor(args[1]):
+                if all(_is_int_or_scalar_tensor(arg) for arg in args[1:]):
                     kwargs["x"] = args[0]
                     kwargs['shape'] = list(args[1:])
                     args = ()
@@ -696,6 +710,24 @@ def sum_decorator() -> Callable[
                     kwargs["keepdim"] = args[3]
                 args = ()
 
+            return func(*args, **kwargs)
+
+        wrapper.__signature__ = inspect.signature(func)
+        return wrapper
+
+    return decorator
+
+
+def floor_divide_decorator():
+    def decorator(func: Callable[_InputT, _RetT]) -> Callable[_InputT, _RetT]:
+        @functools.wraps(func)
+        def wrapper(*args: _InputT.args, **kwargs: _InputT.kwargs) -> _RetT:
+            if not kwargs:
+                return func(*args, **kwargs)
+            if "input" in kwargs and "x" not in kwargs:
+                kwargs["x"] = kwargs.pop("input")
+            if "other" in kwargs and "y" not in kwargs:
+                kwargs["y"] = kwargs.pop("other")
             return func(*args, **kwargs)
 
         wrapper.__signature__ = inspect.signature(func)

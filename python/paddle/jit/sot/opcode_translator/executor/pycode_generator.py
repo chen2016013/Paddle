@@ -482,7 +482,7 @@ class PyCodeGen:
             elif not self._code_options['co_name'].startswith("#"):
                 random_number = int(CODE_NAME_RNG.random() * 100000000)
                 self._code_options['co_name'] = (
-                    f"#{self._code_options['co_name']}_{hex(random_number & 0xFFFFF)[2:]:0>5}"
+                    f"#{self._code_options['co_name']}_{(random_number & 0xFFFFF):05x}"
                 )
 
     def gen_pycode(self) -> types.CodeType:
@@ -998,11 +998,8 @@ class ResumeFunctionType(Enum):
     IF_RESUME = 0
     # Call breakgraph
     CALL_RESUME = 1
-    # Loop breakgraph
-    LOOP_BODY_RESUME = 2
-    AFTER_LOOP_RESUME = 3
     # Loop inline call
-    LOOP_BODY_INLINE_CALL = 4
+    LOOP_BODY_INLINE_CALL = 2
 
 
 class ResumeFunctionCreator:

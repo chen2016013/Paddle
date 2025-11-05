@@ -55,6 +55,10 @@ from paddle.distributed.flex_checkpoint.dcp.sharded_weight import (
     ShardedStateDict,
     build_sharded_state_dict,
 )
+
+if TYPE_CHECKING:
+    from paddle.distributed.communication.group import Group
+
 from paddle.framework import ParamAttr
 from paddle.profiler.utils import in_profiler_mode
 from paddle.utils import deprecated
@@ -2311,6 +2315,35 @@ class Layer:
 
         return sharded_state_dict
 
+    def full(
+        self,
+        aoa_config: dict[str : list[str]] | None = None,
+        process_group: Group | None = None,
+    ):
+        """
+        Returns an iterator over the full, unsharded model parameters.
+        The output parameters can be customized using the `aoa_config` argument.
+
+        Args:
+            aoa_config (dict[str, list[str]], optional):
+                Optional. Specifies the Area of Application (AOA) customization configuration.
+                The dictionary keys are strings and the values are lists of strings.
+                If None, all parameters are returned.
+            process_group (Group, optional):
+                Optional. Specifies the process group for collective communication.
+                If None, the default process group is used.
+
+        Returns:
+            Iterator:
+                An iterator over the full, unsharded model parameters, optionally filtered and customized according to `aoa_config`.
+        """
+
+        from paddle.distributed.flex_checkpoint.dcp.full_param import (
+            full_param,
+        )
+
+        return full_param(self, aoa_config, process_group)
+
     @framework.deprecate_stat_dict
     def set_state_dict(
         self,
@@ -2451,6 +2484,7 @@ class Layer:
         device: PlaceLike | None = None,
         dtype: DTypeLike | None = None,
         blocking: bool | None = None,
+        non_blocking: bool | None = None,
     ) -> Self:
         '''
         Cast the parameters and buffers of Layer by the give device, dtype and blocking.
@@ -2464,6 +2498,9 @@ class Layer:
 
             blocking(bool|None, optional): If False and the source is in pinned memory, the copy will be
               asynchronous with respect to the host. Otherwise, the argument has no effect. If None, the blocking is set True. Default: None.
+
+            non_blocking(bool|None, optional): If True and the source is in pinned memory, the copy will be
+              asynchronous with respect to the host. Otherwise, the argument has no effect. If None, the non_blocking is set False. Default: None.
 
         Returns:
             self
@@ -2512,6 +2549,7 @@ class Layer:
             device=device,
             dtype=dtype,
             blocking=blocking,
+            non_blocking=non_blocking,
             include_sublayers=True,
             floating_only=False,
         )
@@ -2618,6 +2656,7 @@ class Layer:
         device: PlaceLike | None = None,
         dtype: DTypeLike | None = None,
         blocking: bool | None = None,
+        non_blocking: bool | None = None,
         include_sublayers: bool = True,
         floating_only: bool = False,
     ):
@@ -2634,6 +2673,9 @@ class Layer:
             blocking(bool|None, optional): If False and the source is in pinned memory, the copy will be
               asynchronous with respect to the host. Otherwise, the argument has no effect. If None, the blocking is set True. Default: None.
 
+            non_blocking(bool|None, optional): If True and the source is in pinned memory, the copy will be
+              asynchronous with respect to the host. Otherwise, the argument has no effect. If None, the non_blocking is set False. Default: None.
+
             include_sublayers(bool, optional): If True, deal with self and all sublayers parameters and buffers, if not only deal with self parameters and buffers. Default: True.
 
             floating_only(bool, optional): If True, only cast all floating point parameters and buffers of Layer by the give device, dtype and blocking.
@@ -2643,7 +2685,12 @@ class Layer:
 
         '''
 
-        if device is None and dtype is None and blocking is None:
+        if (
+            device is None
+            and dtype is None
+            and blocking is None
+            and non_blocking is None
+        ):
             return self
 
         if device is not None:
@@ -2651,18 +2698,12 @@ class Layer:
                 device = paddle.device._convert_to_place(device)
             elif isinstance(
                 device,
-                (
-                    core.CPUPlace,
-                    core.CUDAPlace,
-                    core.CUDAPinnedPlace,
-                    core.XPUPlace,
-                ),
+                core.Place,
             ):
                 pass
             else:
                 raise ValueError(
-                    "device value error, must be str, paddle.CPUPlace(), paddle.CUDAPlace(), paddle.CUDAPinnedPlace() or paddle.XPUPlace(), but the type of device is "
-                    + type(device).__name__
+                    f"device should be type of str, paddle.CPUPlace, paddle.CUDAPlace, paddle.CUDAPinnedPlace, paddle.XPUPlace, or paddle.base.libpaddle.Place, but got {type(device).__name__}"
                 )
 
         if blocking is None:
@@ -2671,6 +2712,14 @@ class Layer:
             assert isinstance(blocking, bool), (
                 "blocking value error, must be the True, False or None"
             )
+
+        if non_blocking is None:
+            non_blocking = False
+        else:
+            assert isinstance(non_blocking, bool), (
+                "non_blocking value error, must be the True, False or None"
+            )
+        blocking = False if not blocking or non_blocking else True
 
         def transform(t, device, dtype, blocking):
             if floating_only and (not paddle.is_floating_point(t)):
